@@ -1,8 +1,9 @@
+import mimetypes
+import platform
+import subprocess
 import typer
 from pathlib import Path
 from typing import Optional, List
-import subprocess
-import mimetypes
 
 app = typer.Typer()
 
@@ -13,10 +14,12 @@ DEFAULT_IGNORE_DIRS = {
     "node_modules",
     ".git",
     ".idea",
+    ".angular",
     ".vscode",
     "build",
     "dist",
     "target",
+
 }
 
 # Default files to ignore
@@ -30,11 +33,11 @@ DEFAULT_IGNORE_FILES = {
 
 
 def generate_tree(
-    directory: Path,
-    prefix: str = "",
-    depth: int = -1,
-    ignore_dirs: set = DEFAULT_IGNORE_DIRS,
-    ignore_files: set = DEFAULT_IGNORE_FILES,
+        directory: Path,
+        prefix: str = "",
+        depth: int = -1,
+        ignore_dirs: set = DEFAULT_IGNORE_DIRS,
+        ignore_files: set = DEFAULT_IGNORE_FILES,
 ) -> str:
     if depth == 0:
         return ""
@@ -74,10 +77,10 @@ def get_file_content(file_path: Path) -> str:
 
         # Check if the file is a text file
         if mime_type and (
-            mime_type.startswith("text/")
-            or mime_type in ["application/json", "application/xml"]
+                mime_type.startswith("text/")
+                or mime_type in ["application/json", "application/xml"]
         ):
-            return file_path.read_text()
+            return file_path.read_text(encoding='utf-8', errors='replace')
         else:
             # For binary files, return file information instead of content
             file_size = file_path.stat().st_size
@@ -86,7 +89,19 @@ def get_file_content(file_path: Path) -> str:
         return f"Error reading file: {file_path}\nError: {str(e)}\n"
 
 
-def copy_to_clipboard(text: str):
+def copy_to_clipboard_windows(text: str):
+    try:
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+        win32clipboard.CloseClipboard()
+    except ImportError:
+        print("Please install 'pywin32' package to use clipboard functionality on Windows.")
+        print("You can install it using: pip install pywin32")
+
+
+def copy_to_clipboard_unix(text: str):
     process = subprocess.Popen(
         "pbcopy", env={"LANG": "en_US.UTF-8"}, stdin=subprocess.PIPE
     )
@@ -95,19 +110,25 @@ def copy_to_clipboard(text: str):
 
 @app.command()
 def main(
-    directory: Path = typer.Argument(..., help="The directory to process"),
-    depth: Optional[int] = typer.Option(
-        -1, help="Depth of directory tree to display (-1 for unlimited)"
-    ),
-    exclude_hidden: bool = typer.Option(
-        True, help="Exclude hidden files and directories"
-    ),
-    ignore_dirs: Optional[List[str]] = typer.Option(
-        None, help="Additional directories to ignore"
-    ),
-    ignore_files: Optional[List[str]] = typer.Option(
-        None, help="Additional files to ignore"
-    ),
+        directory: Path = typer.Argument(..., help="The directory to process"),
+        depth: Optional[int] = typer.Option(
+            -1, help="Depth of directory tree to display (-1 for unlimited)"
+        ),
+        exclude_hidden: bool = typer.Option(
+            True, help="Exclude hidden files and directories"
+        ),
+        ignore_dirs: Optional[List[str]] = typer.Option(
+            None, help="Additional directories to ignore"
+        ),
+        ignore_files: Optional[List[str]] = typer.Option(
+            None, help="Additional files to ignore"
+        ),
+        force_windows: bool = typer.Option(
+            False, help="Force Windows-style clipboard usage"
+        ),
+        force_unix: bool = typer.Option(
+            False, help="Force Unix-style clipboard usage"
+        )
 ):
     """
     Generate a report of directory structure and file contents, then copy it to clipboard.
@@ -140,8 +161,8 @@ def main(
     for file_path in directory.rglob("*"):
         if file_path.is_file():
             if exclude_hidden and (
-                file_path.name.startswith(".")
-                or any(part.startswith(".") for part in file_path.parts)
+                    file_path.name.startswith(".")
+                    or any(part.startswith(".") for part in file_path.parts)
             ):
                 continue
             if any(ignore_dir in file_path.parts for ignore_dir in dirs_to_ignore):
@@ -155,6 +176,17 @@ def main(
             output.append("-" * 40)
 
     full_output = "\n".join(output)
+
+    # Determine which clipboard function to use
+    if force_windows:
+        copy_to_clipboard = copy_to_clipboard_windows
+    elif force_unix:
+        copy_to_clipboard = copy_to_clipboard_unix
+    elif platform.system() == "Windows":
+        copy_to_clipboard = copy_to_clipboard_windows
+    else:
+        copy_to_clipboard = copy_to_clipboard_unix
+
     copy_to_clipboard(full_output)
 
     typer.echo("Directory structure and file contents have been copied to clipboard.")
